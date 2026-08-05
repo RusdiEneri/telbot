@@ -4,13 +4,15 @@ Go-based tool for managing Telkomsel accounts via **Telegram Bot**, **Terminal C
 
 ## Features
 
-- 🔑 SMS OTP login with session caching
-- 📊 Profile, balance, quota checking
-- 📦 Browse recommended packages
-- 🛍️ Purchase packages (Pulsa / QRIS)
-- ⏰ Auto-buy monitor (auto-purchase when quota is depleted or below a custom MB threshold)
-- 🔄 Auto re-login via OTP webhook (session renewal without manual intervention)
-- 🤖 MCP server for AI agent integration
+- 🔑 **SMS OTP login** with session caching
+- 👥 **Multi-account support** (Switch & manage multiple Telkomsel numbers seamlessly)
+- 📊 **Profile, balance & quota checking**
+- 📦 **Browse recommended packages**
+- 🛍️ **Purchase packages** (Pulsa / QRIS)
+- ⏰ **Auto-buy monitor** (Auto-purchase when quota is depleted or below custom MB threshold)
+- 🔄 **Auto re-login via OTP webhook** (Session renewal without manual intervention)
+- 🤖 **MCP server** for AI agent integration
+- 🐳 **Docker & Cloud ready** (Easy deployment on Koyeb, VPS, etc. with persistent storage support)
 
 ## Quick Start
 
@@ -62,13 +64,42 @@ To install the binary globally so you can run `telbot` from any folder:
 6. Click **New**, add `C:\telbot\`, and click **OK** to save everything.
 7. You can now run `telbot` from any new PowerShell or Command Prompt window.
 
+## 🐳 Docker & Cloud Deployment (Koyeb)
+
+### Using Docker
+You can build and run `telbot` locally or on a VPS using Docker:
+
+```bash
+# Build Docker image
+docker build -t telbot .
+
+# Run container with persistent data volume
+docker run -d \
+  --name telbot \
+  -e TELKOMSEL_BOT_TOKEN="your_bot_token" \
+  -e TELEGRAM_ADMIN_ID="your_telegram_id" \
+  -e TELBOT_DATA_DIR="/data" \
+  -v telbot_data:/data \
+  telbot
+```
+
+### Deploy to Koyeb
+1. Push your repository to GitHub.
+2. Create a new Service on [Koyeb](https://www.koyeb.com/) and choose **Dockerfile** builder.
+3. Set the Environment Variables:
+   - `TELKOMSEL_BOT_TOKEN`: Your Telegram Bot Token
+   - `TELEGRAM_ADMIN_ID`: Your Telegram User ID
+   - `TELBOT_DATA_DIR`: `/data`
+4. Add a **Persistent Volume** mounted at `/data` to persist your `sessions.json` across container restarts.
+
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `TELKOMSEL_BOT_TOKEN` | Bot mode | Telegram bot token from BotFather |
 | `TELEGRAM_ADMIN_ID` | Bot mode | Your Telegram user ID |
-| `OTP_WEBHOOK_PORT` | Optional | Port for OTP webhook listener (e.g. `8081`) |
+| `TELBOT_DATA_DIR` | Optional | Custom directory for storing `sessions.json` and logs (e.g. `/data`) |
+| `OTP_WEBHOOK_PORT` | Optional | Port for OTP webhook listener (e.g. `8080`) |
 | `OTP_WEBHOOK_SECRET` | Optional | Shared secret for webhook authentication |
 
 You can either export these directly in your terminal, or place them in a `.env` file located in your platform's standard configuration directory:
