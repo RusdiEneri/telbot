@@ -24,15 +24,15 @@ func GetSessionPath() string {
 }
 
 const (
-	BaseURL        = "https://tdw.telkomsel.com"
-	QuotaEndpoint  = "/api/subscriber/v5/bonuses"
-	BuyEndpoint    = "/api/payment/fulfillment/v2"
-	StatusEndpoint = "/api/payment/status"
-	OffersEndpoint = "/api/offers/recommended/v2"
-	LoginURL       = "https://my.telkomsel.com"
-	OfferId        = "0fc00fd41bcd26376d806925d746705e"
-	DefaultPayment = "qris"
-	MaxRetries     = 3
+	BaseURL            = "https://tdw.telkomsel.com"
+	QuotaEndpoint      = "/api/subscriber/v5/bonuses"
+	BuyEndpoint        = "/api/payment/fulfillment/v2"
+	StatusEndpoint     = "/api/payment/status"
+	OffersEndpoint     = "/api/offers/recommended/v2"
+	LoginURL           = "https://my.telkomsel.com"
+	OfferId            = "0fc00fd41bcd26376d806925d746705e"
+	DefaultPayment     = "qris"
+	MaxRetries         = 3
 	WebAppVersion      = "2.0.0"
 	ChromePreset       = "chrome-145"
 	CiamBaseURL        = "https://ciam.telkomsel.com"
@@ -54,14 +54,31 @@ type Config struct {
 }
 
 func Load() *Config {
+	// 1. Coba load .env dari Current Working Directory (Folder root 'telbot')
+	// Ini akan berjalan jika kamu run dari dalam folder telbot (misal: go run main.go)
+	if err := godotenv.Load(".env"); err != nil {
+		if Verbose {
+			log.Printf("ℹ️  No .env file found in current directory: %v", err)
+		}
+	}
+
+	// 2. Fallback: Coba load .env dari lokasi file executable (binary)
+	// Berguna kalau kamu sudah compile (go build) dan run binary-nya dari mana saja
+	if ex, err := os.Executable(); err == nil {
+		exDir := filepath.Dir(ex)
+		envExPath := filepath.Join(exDir, ".env")
+		godotenv.Load(envExPath) // Load jika ada, abaikan jika error
+	}
+
+	// 3. Fallback: Load .env dari User Config Dir (~/.config/telbot/.env)
 	envPath := filepath.Join(GetConfigDir(), ".env")
 	if err := godotenv.Load(envPath); err != nil {
-
 		if Verbose {
 			log.Printf("ℹ️  No .env file found at %s: %v", envPath, err)
 		}
 	}
 
+	// Validasi Env Vars
 	token := os.Getenv("TELKOMSEL_BOT_TOKEN")
 	if token == "" {
 		log.Fatal("❌ TELKOMSEL_BOT_TOKEN env var is required")
