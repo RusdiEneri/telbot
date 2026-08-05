@@ -58,6 +58,11 @@ type Config struct {
 }
 
 func Load() *Config {
+	// 0. Prioritas tertinggi: Load .env dari TELBOT_DATA_DIR (untuk Docker/VPS)
+	if dataDir := os.Getenv("TELBOT_DATA_DIR"); dataDir != "" {
+		godotenv.Overload(filepath.Join(dataDir, ".env"))
+	}
+
 	// 1. Coba load .env dari Current Working Directory (Folder root 'telbot')
 	// Ini akan berjalan jika kamu run dari dalam folder telbot (misal: go run main.go)
 	if err := godotenv.Load(".env"); err != nil {
