@@ -26,23 +26,27 @@ type Handler struct {
 	adminID     int64
 	otpListener *otp.Listener
 
-	otpChans   map[int64]chan string
+	otpChans   map[string]chan string // Key: FullPhone
 	otpChansMu sync.Mutex
 
-	autoStops   map[int64]context.CancelFunc
+	pendingLogin   map[int64]string // Key: Telegram UserID, Value: FullPhone
+	pendingLoginMu sync.Mutex
+
+	autoStops   map[string]context.CancelFunc // Key: FullPhone
 	autoStopsMu sync.Mutex
 }
 
 func NewHandler(bot *gotgbot.Bot, sessions *model.SessionManager, adminID int64, otpListener *otp.Listener) *Handler {
 	return &Handler{
-		bot:         bot,
-		sessions:    sessions,
-		auth:        telkomsel.NewAuth(),
-		api:         telkomsel.NewClient(),
-		adminID:     adminID,
-		otpListener: otpListener,
-		otpChans:    make(map[int64]chan string),
-		autoStops:   make(map[int64]context.CancelFunc),
+		bot:          bot,
+		sessions:     sessions,
+		auth:         telkomsel.NewAuth(),
+		api:          telkomsel.NewClient(),
+		adminID:      adminID,
+		otpListener:  otpListener,
+		otpChans:     make(map[string]chan string),
+		pendingLogin: make(map[int64]string),
+		autoStops:    make(map[string]context.CancelFunc),
 	}
 }
 
@@ -61,36 +65,28 @@ func (h *Handler) handleStart(b *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	userID := ctx.EffectiveSender.Id()
-	session := h.sessions.Get(userID)
+	accounts := h.sessions.List()
 
-	if session != nil && session.IsLoggedIn() {
-		apiCtx := context.Background()
-		profile, err := h.api.GetFullProfile(apiCtx, session)
-		text := "✅ Sesi aktif!"
-		if err == nil && profile != nil {
-			text = telkomsel.FormatProfile(profile)
-		}
-		text += "\nPilih aksi:"
-		_, err2 := ctx.EffectiveMessage.Reply(b, text, &gotgbot.SendMessageOpts{
-			ParseMode:   "Markdown",
-			ReplyMarkup: kbProfile(),
-		})
-		return err2
-	}
-
-	text := `🔰 *Telbot*
+	if len(accounts) == 0 {
+		text := `🔰 *Telbot*
 
 Selamat datang! Bot ini membantu kamu:
-• Login otomatis ke MyTelkomsel
+• Login otomatis ke MyTelkomsel (Multi Akun)
 • Cek profil & kuota
 • Beli paket otomatis
 
-Tekan tombol di bawah untuk mulai.`
+Tekan tombol di bawah untuk menambahkan akun pertama.`
+		_, err := ctx.EffectiveMessage.Reply(b, text, &gotgbot.SendMessageOpts{
+			ParseMode:   "Markdown",
+			ReplyMarkup: kbLogin(),
+		})
+		return err
+	}
 
+	text := "🔰 *Telbot*\n\nPilih akun untuk dikelola atau tambahkan akun baru:"
 	_, err := ctx.EffectiveMessage.Reply(b, text, &gotgbot.SendMessageOpts{
 		ParseMode:   "Markdown",
-		ReplyMarkup: kbLogin(),
+		ReplyMarkup: kbAccounts(accounts),
 	})
 	return err
 }
@@ -107,17 +103,27 @@ func (h *Handler) handleCallback(b *gotgbot.Bot, ctx *ext.Context) error {
 	userID := cq.From.Id
 	data := cq.Data
 
-	if data != "login" {
-		session := h.sessions.Get(userID)
-		if session != nil && session.State.IsAwaiting() {
+	if data != "login" && data != "add_account" && data != "change_account" && data != "logout" {
+		session := h.sessions.GetActive(userID)
+		if session != nil && session.IsAwaiting() {
 			session.State = model.StateLoggedIn
-			h.sessions.Set(userID, session)
+			h.sessions.Set(session.FullPhone, session)
 		}
 	}
 
 	switch {
-	case data == "login":
+	case strings.HasPrefix(data, "select_acc_"):
+		phone := strings.TrimPrefix(data, "select_acc_")
+		h.sessions.SetActive(userID, phone)
+		h.cbShowProfile(b, chatID, msgID, userID)
+
+	case data == "login", data == "add_account":
 		h.cbLogin(b, chatID, msgID, userID)
+
+	case data == "change_account":
+		accounts := h.sessions.List()
+		kb := kbAccounts(accounts)
+		h.editMsg(b, chatID, msgID, "🔰 *Telbot*\n\nPilih akun:", &kb)
 
 	case data == "back_profile" || data == "refresh":
 		h.cbShowProfile(b, chatID, msgID, userID)
@@ -137,10 +143,10 @@ func (h *Handler) handleCallback(b *gotgbot.Bot, ctx *ext.Context) error {
 
 	case data == "pkg_custom":
 		h.editMsg(b, chatID, msgID, "🆔 Kirim Offer ID paket yang ingin dibeli. \n\n Buka: https://my.telkomsel.com/web\n\n Contoh paket tiktok: https://my.telkomsel.com/app/package-details/bbc8df8c82679d736a792a39b7009499 \n\nAmbil ID Contoh: `bbc8df8c82679d736a792a39b7009499`", nil)
-		session := h.sessions.Get(userID)
+		session := h.sessions.GetActive(userID)
 		if session != nil {
 			session.State = model.StateAwaitingOfferID
-			h.sessions.Set(userID, session)
+			h.sessions.Set(session.FullPhone, session)
 		}
 
 	case strings.HasPrefix(data, "pay_qris"):
@@ -171,10 +177,10 @@ func (h *Handler) handleCallback(b *gotgbot.Bot, ctx *ext.Context) error {
 
 	case data == "auto_custom":
 		h.editMsg(b, chatID, msgID, "⌨️ Kirim waktu monitor dalam menit.\n\nContoh: `30`", nil)
-		session := h.sessions.Get(userID)
+		session := h.sessions.GetActive(userID)
 		if session != nil {
 			session.State = model.StateAwaitingAutoInt
-			h.sessions.Set(userID, session)
+			h.sessions.Set(session.FullPhone, session)
 		}
 
 	case data == "auto_thresh_0":
@@ -188,10 +194,10 @@ func (h *Handler) handleCallback(b *gotgbot.Bot, ctx *ext.Context) error {
 
 	case data == "auto_thresh_custom":
 		h.editMsg(b, chatID, msgID, "⌨️ Kirim batas minimum kuota dalam MB.\n\nContoh: `500`", nil)
-		session := h.sessions.Get(userID)
+		session := h.sessions.GetActive(userID)
 		if session != nil {
 			session.State = model.StateAwaitingAutoThreshold
-			h.sessions.Set(userID, session)
+			h.sessions.Set(session.FullPhone, session)
 		}
 
 	case data == "auto_pkg_ilmupedia":
@@ -203,10 +209,10 @@ func (h *Handler) handleCallback(b *gotgbot.Bot, ctx *ext.Context) error {
 
 	case data == "auto_pkg_custom":
 		h.editMsg(b, chatID, msgID, "🆔 Kirim Offer ID paket untuk auto-buy.\n\nContoh: `0fc00fd41bcd26376d806925d746705e`", nil)
-		session := h.sessions.Get(userID)
+		session := h.sessions.GetActive(userID)
 		if session != nil {
 			session.State = model.StateAwaitingAutoOffer
-			h.sessions.Set(userID, session)
+			h.sessions.Set(session.FullPhone, session)
 		}
 
 	case data == "auto_pay_pulsa":
@@ -216,10 +222,19 @@ func (h *Handler) handleCallback(b *gotgbot.Bot, ctx *ext.Context) error {
 		h.cbStopAutoBuy(b, chatID, msgID, userID)
 
 	case data == "logout":
-		h.stopAutoBuy(userID)
-		h.sessions.Delete(userID)
-		kb := kbLogin()
-		h.editMsg(b, chatID, msgID, "👋 Sudah logout.", &kb)
+		session := h.sessions.GetActive(userID)
+		if session != nil {
+			h.stopAutoBuy(session.FullPhone)
+			h.sessions.Delete(session.FullPhone)
+		}
+		accounts := h.sessions.List()
+		if len(accounts) > 0 {
+			kb := kbAccounts(accounts)
+			h.editMsg(b, chatID, msgID, "👋 Sudah logout.\n\nPilih akun lain:", &kb)
+		} else {
+			kb := kbLogin()
+			h.editMsg(b, chatID, msgID, "👋 Sudah logout.", &kb)
+		}
 	}
 
 	return nil
@@ -236,19 +251,23 @@ func (h *Handler) handleMessage(b *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
+	h.pendingLoginMu.Lock()
+	full := h.pendingLogin[userID]
+	h.pendingLoginMu.Unlock()
+
 	h.otpChansMu.Lock()
-	_, hasOTP := h.otpChans[userID]
+	_, hasOTP := h.otpChans[full]
 	h.otpChansMu.Unlock()
 
-	if hasOTP {
+	if hasOTP && full != "" {
 		return h.handleOTPInput(b, ctx, userID, text)
 	}
 
-	session := h.sessions.Get(userID)
+	session := h.sessions.GetActive(userID)
 
 	if session != nil && session.State == model.StateAwaitingOfferID {
 		session.State = model.StateIdle
-		h.sessions.Set(userID, session)
+		h.sessions.Set(session.FullPhone, session)
 		kb := kbPaymentSelect(text)
 		_, err := ctx.EffectiveMessage.Reply(b, fmt.Sprintf("🆔 Offer ID: `%s`\n\n💳 Pembayaran Via:", text), &gotgbot.SendMessageOpts{
 			ParseMode:   "Markdown",
@@ -265,7 +284,7 @@ func (h *Handler) handleMessage(b *gotgbot.Bot, ctx *ext.Context) error {
 			return err
 		}
 		session.AutoBuyInterval = minutes
-		h.sessions.Set(userID, session)
+		h.sessions.Set(session.FullPhone, session)
 
 		kb := kbAutoThreshold()
 		_, err := ctx.EffectiveMessage.Reply(b, fmt.Sprintf("✅ Interval: *%d menit*\n\n📉 Pilih batas minimum kuota untuk auto-buy:", minutes), &gotgbot.SendMessageOpts{
@@ -283,7 +302,7 @@ func (h *Handler) handleMessage(b *gotgbot.Bot, ctx *ext.Context) error {
 			return err
 		}
 		session.AutoBuyThreshold = mb
-		h.sessions.Set(userID, session)
+		h.sessions.Set(session.FullPhone, session)
 
 		threshStr := fmt.Sprintf("< %d MB", mb)
 		if mb == 0 {
@@ -303,7 +322,7 @@ func (h *Handler) handleMessage(b *gotgbot.Bot, ctx *ext.Context) error {
 	if session != nil && session.State == model.StateAwaitingAutoOffer {
 		session.State = model.StateIdle
 		session.AutoBuyPackage = text
-		h.sessions.Set(userID, session)
+		h.sessions.Set(session.FullPhone, session)
 
 		threshStr := fmt.Sprintf("< %d MB", session.AutoBuyThreshold)
 		if session.AutoBuyThreshold == 0 {
@@ -323,7 +342,6 @@ func (h *Handler) handleMessage(b *gotgbot.Bot, ctx *ext.Context) error {
 	}
 
 	if util.IsPhoneNumber(text) {
-		h.sessions.Set(userID, &model.Session{State: model.StateAwaitingPhone})
 		return h.handlePhoneInput(b, ctx, userID, text)
 	}
 

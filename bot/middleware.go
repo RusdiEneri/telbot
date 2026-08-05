@@ -23,16 +23,16 @@ func (h *Handler) editMsg(b *gotgbot.Bot, chatID, msgID int64, text string, kb *
 }
 
 func (h *Handler) checkSession(b *gotgbot.Bot, chatID, msgID, userID int64) (*model.Session, bool) {
-	session := h.sessions.Get(userID)
+	session := h.sessions.GetActive(userID)
 	if session == nil || !session.IsLoggedIn() {
-		h.showExpiredLogin(b, chatID, msgID, "❌ Belum login.")
+		h.showSelectAccount(b, chatID, msgID, "❌ Belum ada akun aktif. Pilih akun atau login dulu.")
 		return nil, false
 	}
 
 	apiCtx := context.Background()
 	_, _, err := h.api.GetBalance(apiCtx, session)
 	if err != nil && errors.Is(err, telkomsel.ErrUnauthorized) {
-		h.sessions.Delete(userID)
+		h.sessions.Delete(session.FullPhone)
 		h.showExpiredLogin(b, chatID, msgID, "⚠️ Sesi expired! Login ulang.")
 		return nil, false
 	}
@@ -43,4 +43,15 @@ func (h *Handler) checkSession(b *gotgbot.Bot, chatID, msgID, userID int64) (*mo
 func (h *Handler) showExpiredLogin(b *gotgbot.Bot, chatID, msgID int64, text string) {
 	kb := kbLogin()
 	h.editMsg(b, chatID, msgID, text, &kb)
+}
+
+func (h *Handler) showSelectAccount(b *gotgbot.Bot, chatID, msgID int64, text string) {
+	accounts := h.sessions.List()
+	if len(accounts) > 0 {
+		kb := kbAccounts(accounts)
+		h.editMsg(b, chatID, msgID, text, &kb)
+	} else {
+		kb := kbLogin()
+		h.editMsg(b, chatID, msgID, text, &kb)
+	}
 }

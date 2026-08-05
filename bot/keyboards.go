@@ -4,9 +4,26 @@ import (
 	"fmt"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
-
+	"telkomsel-bot/model"
 	"telkomsel-bot/telkomsel"
 )
+
+func kbAccounts(accounts []*model.Session) gotgbot.InlineKeyboardMarkup {
+	var rows [][]gotgbot.InlineKeyboardButton
+	for _, acc := range accounts {
+		phone := acc.FullPhone
+		if phone == "" {
+			phone = acc.Phone
+		}
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: fmt.Sprintf("📱 +%s", phone), CallbackData: "select_acc_" + phone},
+		})
+	}
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "➕ Tambah Akun", CallbackData: "add_account"},
+	})
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
 
 func kbMenuWithOffers(offers []telkomsel.RecommendedOffer) gotgbot.InlineKeyboardMarkup {
 	var rows [][]gotgbot.InlineKeyboardButton
@@ -39,51 +56,97 @@ func kbMenuWithOffers(offers []telkomsel.RecommendedOffer) gotgbot.InlineKeyboar
 func kbLogin() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "Login", CallbackData: "login"}},
+			{{Text: "➕ Tambah Akun", CallbackData: "add_account"}},
 		},
 	}
 }
 
-func kbProfile() gotgbot.InlineKeyboardMarkup {
-	return gotgbot.InlineKeyboardMarkup{
-		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{
-				{Text: "🛒 Beli Paket", CallbackData: "buy"},
-				{Text: "📊 Cek Kouta", CallbackData: "check_quota"},
-			},
-			{{Text: "🔄 Refresh", CallbackData: "refresh"}},
-			{{Text: "👋 Logout", CallbackData: "logout"}},
+func kbProfile(accountsCount int) gotgbot.InlineKeyboardMarkup {
+	rows := [][]gotgbot.InlineKeyboardButton{
+		{
+			{Text: "🛒 Beli Paket", CallbackData: "buy"},
+			{Text: "📊 Cek Kouta", CallbackData: "check_quota"},
 		},
+		{{Text: "🔄 Refresh", CallbackData: "refresh"}},
 	}
+
+	if accountsCount > 1 {
+		rows = append(rows, []gotgbot.InlineKeyboardButton{
+			{Text: "👥 Ganti Akun", CallbackData: "change_account"},
+		})
+	}
+
+	rows = append(rows, []gotgbot.InlineKeyboardButton{
+		{Text: "👋 Logout", CallbackData: "logout"},
+	})
+
+	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func kbMenu() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "📚 Ilmupedia", CallbackData: "pkg_ilmupedia"},
-				{Text: "🆔 Custom Id", CallbackData: "pkg_custom"},
+				{Text: "🛒 Beli Paket", CallbackData: "buy"},
+				{Text: "📊 Cek Kuota", CallbackData: "check_quota"},
 			},
-			{{Text: "🤖 Beli Otomatis", CallbackData: "auto_buy"}},
-			{{Text: "🔙 Kembali", CallbackData: "back_profile"}},
+			{
+				{Text: "🔙 Kembali", CallbackData: "back_profile"},
+			},
+		},
+	}
+}
+
+func kbBack(backData string) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{{Text: "🔙 Kembali", CallbackData: backData}},
 		},
 	}
 }
 
 func kbPaymentSelect(offerID string) gotgbot.InlineKeyboardMarkup {
-	qrisData := "pay_qris"
-	pulsaData := "pay_pulsa"
+	payPulsa := "pay_pulsa"
+	payQris := "pay_qris"
 	if offerID != "" {
-		qrisData = "pay_qris_" + offerID
-		pulsaData = "pay_pulsa_" + offerID
+		payPulsa = "pay_pulsa_" + offerID
+		payQris = "pay_qris_" + offerID
 	}
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "QRIS", CallbackData: qrisData},
-				{Text: "💰 PULSA", CallbackData: pulsaData},
+				{Text: "💰 Pulsa", CallbackData: payPulsa},
+				{Text: "📱 QRIS", CallbackData: payQris},
 			},
-			{{Text: "🔙 Kembali", CallbackData: "buy"}},
+			{
+				{Text: "🔙 Kembali", CallbackData: "buy"},
+			},
+		},
+	}
+}
+
+func kbConfirmBuy() gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "✅ Ya, Beli Paket Ini", CallbackData: "confirm_buy"},
+			},
+			{
+				{Text: "❌ Batal", CallbackData: "buy"},
+			},
+		},
+	}
+}
+
+func kbAutoRunning() gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{Text: "🛑 Stop Auto-Buy", CallbackData: "auto_stop"},
+			},
+			{
+				{Text: "🔙 Kembali", CallbackData: "back_profile"},
+			},
 		},
 	}
 }
@@ -92,11 +155,15 @@ func kbAutoMonitor() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "⏱ 20 Menit", CallbackData: "auto_20"},
-				{Text: "⏱ 50 Menit", CallbackData: "auto_50"},
+				{Text: "⏱️ 20 Menit", CallbackData: "auto_20"},
+				{Text: "⏱️ 50 Menit", CallbackData: "auto_50"},
 			},
-			{{Text: "⌨️ Custom", CallbackData: "auto_custom"}},
-			{{Text: "🔙 Kembali", CallbackData: "buy"}},
+			{
+				{Text: "⌨️ Custom", CallbackData: "auto_custom"},
+			},
+			{
+				{Text: "🔙 Kembali", CallbackData: "back_profile"},
+			},
 		},
 	}
 }
@@ -105,21 +172,22 @@ func kbAutoThreshold() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "Habis (0 MB)", CallbackData: "auto_thresh_0"},
-				{Text: "📉 < 100 MB", CallbackData: "auto_thresh_100"},
+				{Text: "📉 0 MB (Habis)", CallbackData: "auto_thresh_0"},
+				{Text: "📉 100 MB", CallbackData: "auto_thresh_100"},
 			},
 			{
-				{Text: "📉 < 200 MB", CallbackData: "auto_thresh_200"},
+				{Text: "📉 200 MB", CallbackData: "auto_thresh_200"},
 				{Text: "⌨️ Custom", CallbackData: "auto_thresh_custom"},
 			},
-			{{Text: "🔙 Kembali", CallbackData: "auto_buy"}},
+			{
+				{Text: "🔙 Kembali", CallbackData: "back_profile"},
+			},
 		},
 	}
 }
 
 func kbAutoPackage(offers []telkomsel.RecommendedOffer) gotgbot.InlineKeyboardMarkup {
 	var rows [][]gotgbot.InlineKeyboardButton
-
 	for _, o := range offers {
 		label := fmt.Sprintf("📦 %s - Rp%s", o.Name, o.Price)
 		if len(label) > 64 {
@@ -129,52 +197,26 @@ func kbAutoPackage(offers []telkomsel.RecommendedOffer) gotgbot.InlineKeyboardMa
 			{Text: label, CallbackData: "auto_pkg_offer_" + o.ID},
 		})
 	}
-
 	rows = append(rows,
 		[]gotgbot.InlineKeyboardButton{
-			{Text: "🆔 Custom Id", CallbackData: "auto_pkg_custom"},
+			{Text: "🆔 Custom Offer ID", CallbackData: "auto_pkg_custom"},
 		},
 		[]gotgbot.InlineKeyboardButton{
-			{Text: "🔙 Kembali", CallbackData: "auto_buy"},
+			{Text: "🔙 Kembali", CallbackData: "back_profile"},
 		},
 	)
-
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func kbAutoPay() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "💰 Pulsa", CallbackData: "auto_pay_pulsa"}},
-			{{Text: "🔙 Kembali", CallbackData: "auto_buy"}},
-		},
-	}
-}
-
-func kbAutoRunning() gotgbot.InlineKeyboardMarkup {
-	return gotgbot.InlineKeyboardMarkup{
-		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "🛑 Stop Monitor", CallbackData: "auto_stop"}},
-			{{Text: "🔙 Kembali", CallbackData: "back_profile"}},
-		},
-	}
-}
-
-func kbConfirmBuy() gotgbot.InlineKeyboardMarkup {
-	return gotgbot.InlineKeyboardMarkup{
-		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
-				{Text: "✅ Ya", CallbackData: "confirm_buy"},
-				{Text: "❌ Tidak", CallbackData: "buy"},
+				{Text: "💰 Pulsa", CallbackData: "auto_pay_pulsa"},
 			},
-		},
-	}
-}
-
-func kbBack(target string) gotgbot.InlineKeyboardMarkup {
-	return gotgbot.InlineKeyboardMarkup{
-		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
-			{{Text: "🔙 Kembali", CallbackData: target}},
+			{
+				{Text: "🔙 Kembali", CallbackData: "back_profile"},
+			},
 		},
 	}
 }

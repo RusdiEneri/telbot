@@ -10,6 +10,10 @@ import (
 )
 
 func GetConfigDir() string {
+	if custom := os.Getenv("TELBOT_DATA_DIR"); custom != "" {
+		os.MkdirAll(custom, 0755)
+		return custom
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		configDir = "."

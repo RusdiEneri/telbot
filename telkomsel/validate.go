@@ -9,7 +9,7 @@ import (
 )
 
 func ValidateSessions(sessions *model.SessionManager, api *Client) {
-	all := sessions.All()
+	all := sessions.List()
 	if len(all) == 0 {
 		return
 	}
@@ -17,22 +17,22 @@ func ValidateSessions(sessions *model.SessionManager, api *Client) {
 	log.Printf("🔍 Validating %d saved session(s)...", len(all))
 	apiCtx := context.Background()
 
-	for userID, session := range all {
+	for _, session := range all {
 		if !session.IsLoggedIn() {
-			log.Printf("  ⏭ User %d: not logged in (state=%s), skipping", userID, session.State)
+			log.Printf("  ⏭ Account +%s: not logged in (state=%s), skipping", session.FullPhone, session.State)
 			continue
 		}
 
 		_, _, err := api.GetBalance(apiCtx, session)
 		if err != nil {
 			if errors.Is(err, ErrUnauthorized) {
-				log.Printf("  ❌ User %d: token expired, removing session", userID)
-				sessions.Delete(userID)
+				log.Printf("  ❌ Account +%s: token expired, removing session", session.FullPhone)
+				sessions.Delete(session.FullPhone)
 			} else {
-				log.Printf("  ⚠️ User %d: API error (%v), keeping session", userID, err)
+				log.Printf("  ⚠️ Account +%s: API error (%v), keeping session", session.FullPhone, err)
 			}
 		} else {
-			log.Printf("  ✅ User %d: session valid (+%s)", userID, session.FullPhone)
+			log.Printf("  ✅ Account +%s: session valid", session.FullPhone)
 		}
 	}
 }

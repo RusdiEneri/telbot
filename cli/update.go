@@ -64,7 +64,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loggedInID = 1
 		}
 
-		existing := m.sessions.Get(m.loggedInID)
+		existing := m.sessions.Get(msg.session.FullPhone)
 		if existing != nil {
 			msg.session.AutoBuyInterval = existing.AutoBuyInterval
 			msg.session.AutoBuyThreshold = existing.AutoBuyThreshold
@@ -76,7 +76,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.session.PendingPayment = existing.PendingPayment
 		}
 
-		m.sessions.Set(m.loggedInID, msg.session)
+		m.sessions.Set(msg.session.FullPhone, msg.session)
+		m.sessions.SetActive(m.loggedInID, msg.session.FullPhone)
 		m.loggedInUser = msg.session
 		m.screen = screenMenu
 		m.message = "✓ Login berhasil!"
