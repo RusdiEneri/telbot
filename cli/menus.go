@@ -2,12 +2,33 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"telkomsel-bot/util"
 )
+
+func (m tuiModel) getMenuItems() []string {
+	session := m.getActiveSession()
+	items := []string{}
+
+	if session == nil {
+		items = append(items, "➕ Tambah Akun")
+		if len(m.sessions.List()) > 0 {
+			items = append(items, "👥 Pilih / Ganti Akun")
+		}
+	} else {
+		items = append(items, "📊 Cek Profil")
+		items = append(items, "📦 Cek Kuota")
+		items = append(items, "🛒 Beli Paket")
+		items = append(items, "⏰ Jadwal Auto-Buy")
+		items = append(items, "👥 Ganti Akun")
+		items = append(items, "➕ Tambah Akun Baru")
+		items = append(items, "👋 Logout")
+	}
+
+	return items
+}
 
 func (m tuiModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	items := m.getMenuItems()
@@ -31,54 +52,114 @@ func (m tuiModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m tuiModel) selectMenu(selected string) (tea.Model, tea.Cmd) {
 	m.message = ""
 	switch selected {
-	case "Login":
+	case "➕ Tambah Akun", "➕ Tambah Akun Baru":
 		m.screen = screenLogin
 		m.input.SetValue("")
 		m.input.Placeholder = "812xxxxxxxx"
 		m.input.Focus()
 		return m, nil
-	case "Cek Profil":
-		if m.loggedInUser == nil {
-			m.message = "Belum login."
+
+	case "👥 Pilih / Ganti Akun", "👥 Ganti Akun":
+		m.screen = screenAccountSelect
+		m.cursor = 0
+		return m, nil
+
+	case "📊 Cek Profil":
+		session := m.getActiveSession()
+		if session == nil {
+			m.message = "Belum memilih akun."
 			return m, nil
 		}
 		m.screen = screenLoading
 		m.loading = "Mengambil profil..."
-		return m, m.fetchProfile(m.loggedInUser)
-	case "Cek Kuota":
-		if m.loggedInUser == nil {
-			m.message = "Belum login."
+		return m, m.fetchProfile(session)
+
+	case "📦 Cek Kuota":
+		session := m.getActiveSession()
+		if session == nil {
+			m.message = "Belum memilih akun."
 			return m, nil
 		}
 		m.screen = screenLoading
 		m.loading = "Mengambil kuota..."
-		return m, m.fetchQuota(m.loggedInUser)
-	case "Beli Paket":
-		if m.loggedInUser == nil {
-			m.message = "Belum login."
+		return m, m.fetchQuota(session)
+
+	case "🛒 Beli Paket":
+		session := m.getActiveSession()
+		if session == nil {
+			m.message = "Belum memilih akun."
 			return m, nil
 		}
 		m.screen = screenLoading
-		m.loading = "Mengambil paket rekomendasi..."
-		return m, m.fetchOffers(m.loggedInUser)
-	case "Schedule Auto-Buy":
-		if m.loggedInUser == nil {
-			m.message = "Belum login."
+		m.loading = "Mengambil paket..."
+		return m, m.fetchOffers(session)
+
+	case "⏰ Jadwal Auto-Buy":
+		session := m.getActiveSession()
+		if session == nil {
+			m.message = "Belum memilih akun."
 			return m, nil
 		}
 		m.screen = screenScheduleMenu
 		m.cursor = 0
 		return m, nil
-	case "Logout":
-		if m.loggedInUser == nil {
-			m.message = "Belum login."
+
+	case "👋 Logout":
+		session := m.getActiveSession()
+		if session == nil {
+			m.message = "Belum ada akun aktif."
 			return m, nil
 		}
-		m.sessions.Delete(m.loggedInUser.FullPhone)
-		m.loggedInUser = nil
+		m.sessions.Delete(session.FullPhone)
+		m.activeAccount = ""
 		m.message = "✓ Sudah logout."
 		m.cursor = 0
+
+		accounts := m.sessions.List()
+		if len(accounts) > 0 {
+			m.screen = screenAccountSelect
+		} else {
+			m.screen = screenMenu
+		}
 		return m, nil
+	}
+	return m, nil
+}
+
+func (m tuiModel) updateAccountSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
+	accounts := m.sessions.List()
+
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(accounts) { // +1 untuk "Tambah Akun Baru"
+				m.cursor++
+			}
+		case "enter":
+			if m.cursor < len(accounts) {
+				selectedPhone := accounts[m.cursor].FullPhone
+				m.activeAccount = selectedPhone
+				m.screen = screenMenu
+				m.cursor = 0
+				m.message = fmt.Sprintf("✓ Akun +%s dipilih", selectedPhone)
+			} else {
+				m.screen = screenLogin
+				m.input.SetValue("")
+				m.input.Placeholder = "812xxxxxxxx"
+				m.input.Focus()
+			}
+			return m, nil
+		case "esc":
+			if m.getActiveSession() != nil {
+				m.screen = screenMenu
+				m.cursor = 0
+			}
+			return m, nil
+		}
 	}
 	return m, nil
 }
@@ -87,7 +168,7 @@ func (m tuiModel) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		if key.String() == "enter" {
 			phone := m.input.Value()
-			local, _, err := util.ValidatePhone(phone)
+			local, full, err := util.ValidatePhone(phone)
 			if err != nil {
 				m.screen = screenError
 				m.message = "Nomor tidak valid."
@@ -96,7 +177,7 @@ func (m tuiModel) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loginPhone = local
 			m.screen = screenLoading
 			m.loading = "Proses login..."
-			return m, m.doLogin(local)
+			return m, m.doLogin(local, full)
 		}
 	}
 	var cmd tea.Cmd
@@ -215,14 +296,15 @@ func (m tuiModel) updateBuyPayment(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0
 				return m, nil
 			}
-			if m.loggedInUser == nil {
+			session := m.getActiveSession()
+			if session == nil {
 				m.screen = screenError
-				m.message = "Belum login."
+				m.message = "Belum memilih akun."
 				return m, nil
 			}
 			m.screen = screenLoading
 			m.loading = "Mengambil detail paket..."
-			return m, m.fetchPackage(m.loggedInUser)
+			return m, m.fetchPackage(session)
 		}
 	}
 	return m, nil
@@ -242,14 +324,15 @@ func (m tuiModel) updateBuyConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if m.cursor == 0 {
-				if m.loggedInUser == nil {
+				session := m.getActiveSession()
+				if session == nil {
 					m.screen = screenError
-					m.message = "Belum login."
+					m.message = "Belum memilih akun."
 					return m, nil
 				}
 				m.screen = screenLoading
 				m.loading = "Memproses pembelian..."
-				return m, m.doBuy(m.loggedInUser)
+				return m, m.doBuy(session)
 			}
 			m.screen = screenMenu
 			m.cursor = 0
@@ -259,8 +342,9 @@ func (m tuiModel) updateBuyConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) updateScheduleMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
+	session := m.getActiveSession()
 	status := "Nonaktif"
-	if m.loggedInUser != nil && m.loggedInUser.AutoBuyActive {
+	if session != nil && session.AutoBuyActive {
 		status = "Aktif"
 	}
 	items := []string{"Status: " + status, "Ubah Jadwal", "Ubah Threshold", "Ubah Offer ID", "Ubah Payment", "Kembali"}
@@ -277,10 +361,10 @@ func (m tuiModel) updateScheduleMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			switch m.cursor {
 			case 0:
-				if m.loggedInUser != nil {
-					m.loggedInUser.AutoBuyActive = !m.loggedInUser.AutoBuyActive
-					m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
-					if m.loggedInUser.AutoBuyActive {
+				if session != nil {
+					session.AutoBuyActive = !session.AutoBuyActive
+					m.sessions.Set(session.FullPhone, session)
+					if session.AutoBuyActive {
 						m.message = "✓ Auto-Buy diaktifkan"
 					} else {
 						m.message = "✓ Auto-Buy dinonaktifkan"
@@ -289,21 +373,34 @@ func (m tuiModel) updateScheduleMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case 1:
 				m.screen = screenScheduleInterval
 				m.input.SetValue("")
-				m.input.Placeholder = "Misal: 10, 30, 60 (menit)"
+				m.input.Placeholder = "Contoh: 30"
 				m.input.Focus()
+				if session != nil && session.AutoBuyInterval > 0 {
+					m.input.SetValue(fmt.Sprintf("%d", session.AutoBuyInterval))
+				}
+				return m, nil
 			case 2:
 				m.screen = screenScheduleThreshold
 				m.input.SetValue("")
-				m.input.Placeholder = "Misal: 0 (Habis), 100, 200 (MB)"
+				m.input.Placeholder = "Contoh: 500"
 				m.input.Focus()
+				if session != nil && session.AutoBuyThreshold > 0 {
+					m.input.SetValue(fmt.Sprintf("%d", session.AutoBuyThreshold))
+				}
+				return m, nil
 			case 3:
 				m.screen = screenScheduleOfferID
 				m.input.SetValue("")
-				m.input.Placeholder = "Offer ID dari web..."
+				m.input.Placeholder = "Offer ID atau 'ilmupedia'"
 				m.input.Focus()
+				if session != nil && session.AutoBuyPackage != "" {
+					m.input.SetValue(session.AutoBuyPackage)
+				}
+				return m, nil
 			case 4:
 				m.screen = screenSchedulePayment
 				m.cursor = 0
+				return m, nil
 			case 5:
 				m.screen = screenMenu
 				m.cursor = 0
@@ -316,12 +413,13 @@ func (m tuiModel) updateScheduleMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m tuiModel) updateScheduleThreshold(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		if key.String() == "enter" {
-			m.schThreshold = m.input.Value()
-			if m.loggedInUser != nil {
+			schThreshold := m.input.Value()
+			session := m.getActiveSession()
+			if session != nil {
 				var i int
-				fmt.Sscanf(m.schThreshold, "%d", &i)
-				m.loggedInUser.AutoBuyThreshold = i
-				m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
+				fmt.Sscanf(schThreshold, "%d", &i)
+				session.AutoBuyThreshold = i
+				m.sessions.Set(session.FullPhone, session)
 				m.message = "✓ Threshold diupdate"
 			}
 			m.screen = screenScheduleMenu
@@ -337,12 +435,13 @@ func (m tuiModel) updateScheduleThreshold(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m tuiModel) updateScheduleInterval(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		if key.String() == "enter" {
-			m.schInterval = m.input.Value()
-			if m.loggedInUser != nil {
+			schInterval := m.input.Value()
+			session := m.getActiveSession()
+			if session != nil {
 				var i int
-				fmt.Sscanf(m.schInterval, "%d", &i)
-				m.loggedInUser.AutoBuyInterval = i
-				m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
+				fmt.Sscanf(schInterval, "%d", &i)
+				session.AutoBuyInterval = i
+				m.sessions.Set(session.FullPhone, session)
 				m.message = "✓ Interval diupdate"
 			}
 			m.screen = screenScheduleMenu
@@ -358,10 +457,11 @@ func (m tuiModel) updateScheduleInterval(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m tuiModel) updateScheduleOfferID(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		if key.String() == "enter" {
-			m.schOfferID = m.input.Value()
-			if m.loggedInUser != nil {
-				m.loggedInUser.AutoBuyPackage = m.schOfferID
-				m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
+			schOfferID := m.input.Value()
+			session := m.getActiveSession()
+			if session != nil {
+				session.AutoBuyPackage = schOfferID
+				m.sessions.Set(session.FullPhone, session)
 				m.message = "✓ Offer ID diupdate"
 			}
 			m.screen = screenScheduleMenu
@@ -387,23 +487,21 @@ func (m tuiModel) updateSchedulePayment(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 		case "enter":
+			session := m.getActiveSession()
 			switch m.cursor {
 			case 0:
-				m.schPayment = "AIRTIME"
-				if m.loggedInUser != nil {
-					m.loggedInUser.AutoBuyPayment = m.schPayment
-					m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
-					m.message = "✓ Payment diupdate"
+				if session != nil {
+					session.AutoBuyPayment = "AIRTIME"
+					m.sessions.Set(session.FullPhone, session)
+					m.message = "✓ Payment diupdate (Pulsa)"
 				}
 			case 1:
-				m.schPayment = "qris"
-				if m.loggedInUser != nil {
-					m.loggedInUser.AutoBuyPayment = m.schPayment
-					m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
-					m.message = "✓ Payment diupdate"
+				if session != nil {
+					session.AutoBuyPayment = "qris"
+					m.sessions.Set(session.FullPhone, session)
+					m.message = "✓ Payment diupdate (QRIS)"
 				}
 			case 2:
-
 			}
 			m.screen = screenScheduleMenu
 			m.cursor = 0
@@ -411,167 +509,4 @@ func (m tuiModel) updateSchedulePayment(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
-}
-
-func (m tuiModel) getMenuItems() []string {
-	if m.loggedInUser != nil {
-		return []string{"Cek Profil", "Cek Kuota", "Beli Paket", "Schedule Auto-Buy", "Logout"}
-	}
-	return []string{"Login"}
-}
-
-func (m tuiModel) viewMenu() string {
-	var b strings.Builder
-	items := m.getMenuItems()
-
-	if m.loggedInUser != nil {
-		b.WriteString(successStyle.Render("● Logged in: +" + m.loggedInUser.FullPhone))
-		b.WriteString("\n\n")
-	} else {
-		b.WriteString(dimStyle.Render("● Belum login"))
-		b.WriteString("\n\n")
-	}
-
-	for i, item := range items {
-		if i == m.cursor {
-			b.WriteString(selectedStyle.Render("▸ " + item))
-		} else {
-			b.WriteString(menuStyle.Render("  " + item))
-		}
-		b.WriteString("\n")
-	}
-
-	if m.message != "" {
-		b.WriteString("\n")
-		if strings.HasPrefix(m.message, "✓") {
-			b.WriteString(successStyle.Render(m.message))
-		} else {
-			b.WriteString(errorStyle.Render("✗ " + m.message))
-		}
-	}
-
-	return b.String()
-}
-
-func (m tuiModel) viewBuyMenu() string {
-	items := m.getBuyMenuItems()
-	var b strings.Builder
-	b.WriteString(infoStyle.Render(fmt.Sprintf("📦 Pilih Paket (%d rekomendasi)", len(m.offers))))
-	b.WriteString("\n\n")
-	for i, item := range items {
-		if i == m.cursor {
-			b.WriteString(selectedStyle.Render("▸ " + item))
-		} else {
-			b.WriteString(menuStyle.Render("  " + item))
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
-func (m tuiModel) viewBuyPayment() string {
-	items := []string{"💰 Pulsa", "📱 QRIS", "🔙 Kembali"}
-	var b strings.Builder
-	b.WriteString(infoStyle.Render("Metode Pembayaran"))
-	b.WriteString("\n\n")
-	for i, item := range items {
-		if i == m.cursor {
-			b.WriteString(selectedStyle.Render("▸ " + item))
-		} else {
-			b.WriteString(menuStyle.Render("  " + item))
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
-func (m tuiModel) viewBuyConfirm() string {
-	var b strings.Builder
-	if m.buyDetails != nil {
-		b.WriteString(infoStyle.Render("━━ Detail Paket ━━"))
-		b.WriteString("\n\n")
-		detail := func(name, price, validity string) string {
-			return "Nama:  " + name + "\nHarga: Rp" + price + "\nMasa:  " + validity
-		}(m.buyDetails.Name, m.buyDetails.Price, m.buyDetails.Validity)
-		b.WriteString(boxStyle.Render(detail))
-		b.WriteString("\n\n")
-	}
-
-	b.WriteString(infoStyle.Render("Lanjutkan pembelian?"))
-	b.WriteString("\n\n")
-
-	items := []string{"✅ Ya, Beli", "❌ Tidak, Batal"}
-	for i, item := range items {
-		if i == m.cursor {
-			b.WriteString(selectedStyle.Render("▸ " + item))
-		} else {
-			b.WriteString(menuStyle.Render("  " + item))
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
-func (m tuiModel) viewScheduleMenu() string {
-	b := strings.Builder{}
-	b.WriteString(infoStyle.Render("⏱️ Setup Schedule Auto-Buy"))
-	b.WriteString("\n\n")
-
-	if m.loggedInUser != nil {
-		interval := fmt.Sprintf("%d menit", m.loggedInUser.AutoBuyInterval)
-		if m.loggedInUser.AutoBuyInterval == 0 {
-			interval = "(belum diset)"
-		}
-		thresholdStr := fmt.Sprintf("< %d MB", m.loggedInUser.AutoBuyThreshold)
-		if m.loggedInUser.AutoBuyThreshold == 0 {
-			thresholdStr = "0 MB (Habis)"
-		}
-		offer := m.loggedInUser.AutoBuyPackage
-		if offer == "" {
-			offer = "(belum diset)"
-		}
-		pay := m.loggedInUser.AutoBuyPayment
-		if pay == "" {
-			pay = "(belum diset)"
-		}
-		s := fmt.Sprintf("Interval : %s\nThreshold: %s\nOffer ID : %s\nPayment  : %s", interval, thresholdStr, offer, pay)
-		b.WriteString(boxStyle.Render(s))
-		b.WriteString("\n\n")
-	}
-
-	status := "Nonaktif"
-	if m.loggedInUser != nil && m.loggedInUser.AutoBuyActive {
-		status = "Aktif"
-	}
-	items := []string{"Status: " + status, "Ubah Jadwal", "Ubah Threshold", "Ubah Offer ID", "Ubah Payment", "🔙 Kembali"}
-	for i, item := range items {
-		if i == m.cursor {
-			b.WriteString(selectedStyle.Render("▸ " + item))
-		} else {
-			b.WriteString(menuStyle.Render("  " + item))
-		}
-		b.WriteString("\n")
-	}
-
-	if m.message != "" {
-		b.WriteString("\n")
-		b.WriteString(successStyle.Render(m.message))
-	}
-	return b.String()
-}
-
-func (m tuiModel) viewSchedulePayment() string {
-	items := []string{"💰 Pulsa", "📱 QRIS", "🔙 Kembali"}
-	var b strings.Builder
-	b.WriteString(infoStyle.Render("Metode Pembayaran Default"))
-	b.WriteString("\n\n")
-	for i, item := range items {
-		if i == m.cursor {
-			b.WriteString(selectedStyle.Render("▸ " + item))
-		} else {
-			b.WriteString(menuStyle.Render("  " + item))
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
 }

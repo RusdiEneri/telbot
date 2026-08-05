@@ -17,7 +17,6 @@ import (
 )
 
 func Run() {
-
 	logPath := filepath.Join(os.TempDir(), "telkomsel-cli.log")
 	logFile, err := os.Create(logPath)
 	if err == nil {
@@ -32,22 +31,7 @@ func Run() {
 	auth := telkomsel.NewAuth()
 	sessions := model.NewSessionManager(config.GetSessionPath())
 
-	var loggedInUser *model.Session
-	var loggedInID int64 = 1
-	for _, s := range sessions.List() {
-		if s.IsLoggedIn() {
-			if loggedInUser == nil || s.LastLoginAt.After(loggedInUser.LastLoginAt) {
-				loggedInUser = s
-			}
-		}
-	}
-	if loggedInUser != nil {
-		sessions.SetActive(loggedInID, loggedInUser.FullPhone)
-	}
-
 	m := newModel(api, auth, sessions)
-	m.loggedInUser = loggedInUser
-	m.loggedInID = loggedInID
 
 	// Start OTP webhook listener if configured
 	otpPort := 0
@@ -65,6 +49,28 @@ func Run() {
 			m.otpListener = listener
 			log.Printf("OTP listener on :%d", otpPort)
 		}
+	}
+
+	// Auto-select last used account or show account selector
+	accounts := sessions.List()
+	if len(accounts) > 0 {
+		var latestSession *model.Session
+		var latestTime int64
+		for _, s := range accounts {
+			if s.IsLoggedIn() && s.LastLoginAt.Unix() > latestTime {
+				latestTime = s.LastLoginAt.Unix()
+				latestSession = s
+			}
+		}
+
+		if latestSession != nil {
+			m.activeAccount = latestSession.FullPhone
+			m.screen = screenMenu
+		} else {
+			m.screen = screenAccountSelect
+		}
+	} else {
+		m.screen = screenMenu
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

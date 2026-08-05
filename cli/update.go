@@ -2,11 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"telkomsel-bot/telkomsel"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"telkomsel-bot/telkomsel"
 )
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -60,27 +61,28 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		if m.loggedInID == 0 {
-			m.loggedInID = 1
-		}
+		if msg.session != nil {
+			if msg.session.FullPhone == "" {
+				msg.session.FullPhone = m.loginPhone
+			}
+			
+			existing := m.sessions.Get(msg.session.FullPhone)
+			if existing != nil {
+				msg.session.AutoBuyInterval = existing.AutoBuyInterval
+				msg.session.AutoBuyThreshold = existing.AutoBuyThreshold
+				msg.session.AutoBuyPackage = existing.AutoBuyPackage
+				msg.session.AutoBuyPayment = existing.AutoBuyPayment
+				msg.session.AutoBuyActive = existing.AutoBuyActive
+				msg.session.AutoBuyOrderID = existing.AutoBuyOrderID
+				msg.session.PendingOfferID = existing.PendingOfferID
+				msg.session.PendingPayment = existing.PendingPayment
+			}
 
-		existing := m.sessions.Get(msg.session.FullPhone)
-		if existing != nil {
-			msg.session.AutoBuyInterval = existing.AutoBuyInterval
-			msg.session.AutoBuyThreshold = existing.AutoBuyThreshold
-			msg.session.AutoBuyPackage = existing.AutoBuyPackage
-			msg.session.AutoBuyPayment = existing.AutoBuyPayment
-			msg.session.AutoBuyActive = existing.AutoBuyActive
-			msg.session.AutoBuyOrderID = existing.AutoBuyOrderID
-			msg.session.PendingOfferID = existing.PendingOfferID
-			msg.session.PendingPayment = existing.PendingPayment
+			m.sessions.Set(msg.session.FullPhone, msg.session)
+			m.activeAccount = msg.session.FullPhone
+			m.screen = screenMenu
+			m.message = fmt.Sprintf("✓ Login berhasil! +%s", msg.session.FullPhone)
 		}
-
-		m.sessions.Set(msg.session.FullPhone, msg.session)
-		m.sessions.SetActive(m.loggedInID, msg.session.FullPhone)
-		m.loggedInUser = msg.session
-		m.screen = screenMenu
-		m.message = "✓ Login berhasil!"
 		return m, nil
 
 	case otpRequestMsg:
@@ -133,10 +135,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen != screenPaymentPoll {
 			return m, nil
 		}
-		if m.loggedInUser == nil {
+		session := m.getActiveSession()
+		if session == nil {
 			return m, nil
 		}
-		return m, m.checkPayment(m.loggedInUser)
+		return m, m.checkPayment(session)
 
 	case paymentPollMsg:
 		if msg.err != nil {
@@ -164,6 +167,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenMenu:
 		return m.updateMenu(msg)
+	case screenAccountSelect:
+		return m.updateAccountSelect(msg)
 	case screenLogin:
 		return m.updateLogin(msg)
 	case screenOTP:

@@ -70,7 +70,7 @@ func (m tuiModel) checkPayment(session *model.Session) tea.Cmd {
 	}
 }
 
-func (m *tuiModel) doLogin(localPhone string) tea.Cmd {
+func (m *tuiModel) doLogin(localPhone, fullPhone string) tea.Cmd {
 	otpChan := make(chan string, 1)
 	m.otpChan = otpChan
 
@@ -83,7 +83,7 @@ func (m *tuiModel) doLogin(localPhone string) tea.Cmd {
 
 			if m.otpListener != nil {
 				waitCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-				defer cancel() // LANGSUNG mati kalau manual input yang jalan/menang
+				defer cancel()
 
 				webhookChan := make(chan string, 1)
 				go func() {
@@ -107,7 +107,6 @@ func (m *tuiModel) doLogin(localPhone string) tea.Cmd {
 				}
 			}
 
-			// Manual OTP: wait from user input
 			otp := <-otpChan
 			if otp == "" {
 				return "", fmt.Errorf("OTP kosong")
@@ -116,6 +115,10 @@ func (m *tuiModel) doLogin(localPhone string) tea.Cmd {
 		}
 
 		session, err := m.auth.Login(ctx, localPhone, otpCallback)
+		if session != nil {
+			session.FullPhone = fullPhone
+			session.Phone = localPhone
+		}
 		return loginMsg{session, err}
 	}
 }
