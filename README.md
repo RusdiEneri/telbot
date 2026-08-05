@@ -12,7 +12,7 @@ Go-based tool for managing Telkomsel accounts via **Telegram Bot**, **Terminal C
 - ⏰ **Auto-buy monitor** (Auto-purchase when quota is depleted or below custom MB threshold)
 - 🔄 **Auto re-login via OTP webhook** (Session renewal without manual intervention)
 - 🤖 **MCP server** for AI agent integration
-- 🐳 **Docker & Cloud ready** (Easy deployment on Koyeb, VPS, etc. with persistent storage support)
+- 🐳 **Docker & Cloud ready** (Easy deployment on Fly.io, Railway, VPS with persistent storage support)
 
 ## Quick Start
 
@@ -39,58 +39,102 @@ go run . --mcp       # MCP server
 
 ## Installation (Pre-built Binaries)
 
-If you don't want to install Go or build it yourself, you can download the pre-compiled executables for Windows, Linux, and macOS directly from the **[Releases](https://github.com/0xtbug/telbot/releases)** page of this repository.
-
-To install the binary globally so you can run `telbot` from any folder:
+If you don't want to install Go or build it yourself, download the pre-compiled executables from the **[Releases](https://github.com/0xtbug/telbot/releases)** page.
 
 **Linux / macOS:**
-1. Download the appropriate binary from the Releases page.
-2. Make the file executable:
-   ```bash
-   chmod +x telbot-linux-amd64  # Replace with your downloaded file name
-   ```
-3. Move it to your global bin directory:
-   ```bash
-   sudo mv telbot-linux-amd64 /usr/local/bin/telbot
-   ```
-4. You can now run `telbot` from anywhere in your terminal.
+```bash
+chmod +x telbot-linux-amd64
+sudo mv telbot-linux-amd64 /usr/local/bin/telbot
+# now you can run `telbot` from anywhere
+```
 
 **Windows:**
-1. Download the Windows `.exe` executable from the Releases page.
-2. Rename the downloaded file to `telbot.exe`.
-3. Move it to a permanent folder, for example `C:\telbot\`.
-4. Open the Windows Start menu, search for **Edit the system environment variables**, and open it.
-5. Click **Environment Variables**, find **Path** in the System variables list, and click **Edit**.
-6. Click **New**, add `C:\telbot\`, and click **OK** to save everything.
-7. You can now run `telbot` from any new PowerShell or Command Prompt window.
+1. Download the `.exe` from Releases.
+2. Rename it to `telbot.exe` and move to a permanent folder (e.g. `C:\telbot\`).
+3. Add that folder to your `PATH` via *System → Environment Variables*.
 
-## 🐳 Docker & Cloud Deployment (Koyeb)
+## 🐳 Docker & Cloud Deployment
 
 ### Using Docker
-You can build and run `telbot` locally or on a VPS using Docker:
 
 ```bash
-# Build Docker image
+# Build
 docker build -t telbot .
 
-# Run container with persistent data volume
+# Run with persistent data volume
 docker run -d \
   --name telbot \
+  --restart unless-stopped \
   -e TELKOMSEL_BOT_TOKEN="your_bot_token" \
   -e TELEGRAM_ADMIN_ID="your_telegram_id" \
   -e TELBOT_DATA_DIR="/data" \
+  -p 8080:8080 \
   -v telbot_data:/data \
   telbot
 ```
 
-### Deploy to Koyeb
-1. Push your repository to GitHub.
-2. Create a new Service on [Koyeb](https://www.koyeb.com/) and choose **Dockerfile** builder.
-3. Set the Environment Variables:
-   - `TELKOMSEL_BOT_TOKEN`: Your Telegram Bot Token
-   - `TELEGRAM_ADMIN_ID`: Your Telegram User ID
-   - `TELBOT_DATA_DIR`: `/data`
-4. Add a **Persistent Volume** mounted at `/data` to persist your `sessions.json` across container restarts.
+> 💡 **Tip:** Put your `.env` inside the volume (`/data/.env`) so it persists across container restarts. The entrypoint will auto-load it.
+
+### Deploy to Fly.io (Recommended)
+
+Fly.io supports **persistent volumes** out of the box — perfect for storing `sessions.json`.
+
+```bash
+# Install flyctl
+curl -L https://fly.io/install.sh | sh
+
+# Login
+flyctl auth login
+
+# Create app + volume (one-time setup)
+flyctl apps create telbot
+flyctl volumes create telbot_data --region sin --size 1
+
+# Deploy
+flyctl deploy
+```
+
+Your `fly.toml` should look like this:
+
+```toml
+app = "telbot"
+primary_region = "sin"
+
+[build]
+
+[env]
+  TELBOT_DATA_DIR = "/data"
+
+[mounts]
+  source = "telbot_data"
+  destination = "/data"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+```
+
+### Deploy to Railway
+
+1. Connect your GitHub repo to [Railway](https://railway.app/).
+2. Add environment variables (`TELKOMSEL_BOT_TOKEN`, `TELEGRAM_ADMIN_ID`).
+3. Add a **Volume** and mount it to `/data`.
+4. Set `TELBOT_DATA_DIR=/data` in environment variables.
+5. Deploy.
+
+### Deploy to VPS (DigitalOcean, Vultr, Hostinger, etc.)
+
+```bash
+# On your VPS
+git clone https://github.com/0xtbug/telbot
+cd telbot
+cp .env.example .env
+nano .env  # fill in tokens
+go build -o telbot .
+sudo mv telbot /usr/local/bin/
+
+# Use systemd to keep it running 24/7 (see docs/systemd.md)
+```
 
 ## Environment Variables
 
@@ -98,20 +142,23 @@ docker run -d \
 |----------|----------|-------------|
 | `TELKOMSEL_BOT_TOKEN` | Bot mode | Telegram bot token from BotFather |
 | `TELEGRAM_ADMIN_ID` | Bot mode | Your Telegram user ID |
-| `TELBOT_DATA_DIR` | Optional | Custom directory for storing `sessions.json` and logs (e.g. `/data`) |
+| `TELBOT_DATA_DIR` | Optional | Custom directory for storing `sessions.json` and `.env` (e.g. `/data`) |
 | `OTP_WEBHOOK_PORT` | Optional | Port for OTP webhook listener (e.g. `8080`) |
 | `OTP_WEBHOOK_SECRET` | Optional | Shared secret for webhook authentication |
 
-You can either export these directly in your terminal, or place them in a `.env` file located in your platform's standard configuration directory:
+### `.env` lookup order
 
-- **Windows:** `%APPDATA%\telbot\.env` (e.g., `C:\Users\<User>\AppData\Roaming\telbot\.env`)
-- **Linux/macOS:** `~/.config/telbot/.env`
+Telbot will try to load `.env` from these locations (in order):
+
+1. `$TELBOT_DATA_DIR/.env` (if `TELBOT_DATA_DIR` is set)
+2. Current working directory
+3. The directory where the binary lives
+4. `~/.config/telbot/.env` (Linux/macOS) or `%APPDATA%\telbot\.env` (Windows)
 
 ## 🤖 AI Agent Integration (OpenClaw)
 
-This repository includes official support for [OpenClaw](https://github.com/0xtbug/telbot), an open-source AI agent framework. To teach your AI exactly how to use the Telkomsel MCP Server, simply provide it with the URL to the raw `SKILL.md` file in this repository:
+This repository includes official support for [OpenClaw](https://github.com/openclaw/openclaw), an open-source AI agent framework. Prompt your AI with:
 
-**Prompt your AI with:**
 ```text
 Please load and use this telbot Skill:
 https://raw.githubusercontent.com/0xtbug/telbot/main/telbot-skills/SKILL.md
