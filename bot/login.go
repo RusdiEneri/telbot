@@ -9,7 +9,6 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 
-	"telkomsel-bot/model"
 	"telkomsel-bot/telkomsel"
 	"telkomsel-bot/util"
 )
@@ -25,13 +24,21 @@ func (h *Handler) handlePhoneInput(b *gotgbot.Bot, ctx *ext.Context, userID int6
 
 	otpChan := make(chan string, 1)
 	h.otpChansMu.Lock()
-	h.otpChans[userID] = otpChan
+	h.otpChans[full] = otpChan
 	h.otpChansMu.Unlock()
+
+	h.pendingLoginMu.Lock()
+	h.pendingLogin[userID] = full
+	h.pendingLoginMu.Unlock()
 
 	defer func() {
 		h.otpChansMu.Lock()
-		delete(h.otpChans, userID)
+		delete(h.otpChans, full)
 		h.otpChansMu.Unlock()
+
+		h.pendingLoginMu.Lock()
+		delete(h.pendingLogin, userID)
+		h.pendingLoginMu.Unlock()
 	}()
 
 	apiCtx := context.Background()
@@ -41,7 +48,7 @@ func (h *Handler) handlePhoneInput(b *gotgbot.Bot, ctx *ext.Context, userID int6
 
 		if h.otpListener != nil {
 			waitCtx, cancel := context.WithTimeout(apiCtx, 3*time.Minute)
-			defer cancel() // LANGSUNG mati kalau manual input yang jalan/menang
+			defer cancel()
 
 			webhookChan := make(chan string, 1)
 			go func() {
@@ -72,15 +79,19 @@ func (h *Handler) handlePhoneInput(b *gotgbot.Bot, ctx *ext.Context, userID int6
 
 	session, loginErr := h.auth.Login(apiCtx, local, otpCallback)
 	if loginErr != nil {
-		h.sessions.Delete(userID)
-		log.Printf("[Login] Error for user %d: %v", userID, loginErr)
+		h.sessions.Delete(full)
+		log.Printf("[Login] Error for account %s: %v", full, loginErr)
 		_, replyErr := ctx.EffectiveMessage.Reply(b, fmt.Sprintf("❌ Login gagal: %s", loginErr.Error()), &gotgbot.SendMessageOpts{
 			ReplyMarkup: kbLogin(),
 		})
 		return replyErr
 	}
 
-	existing := h.sessions.Get(userID)
+	// Paksa FullPhone dan Phone sesuai hasil parsing
+	session.FullPhone = full
+	session.Phone = local
+
+	existing := h.sessions.Get(full)
 	if existing != nil {
 		session.AutoBuyInterval = existing.AutoBuyInterval
 		session.AutoBuyPackage = existing.AutoBuyPackage
@@ -89,7 +100,9 @@ func (h *Handler) handlePhoneInput(b *gotgbot.Bot, ctx *ext.Context, userID int6
 		session.PendingOfferID = existing.PendingOfferID
 		session.PendingPayment = existing.PendingPayment
 	}
-	h.sessions.Set(userID, session)
+    
+	h.sessions.Set(full, session)
+	h.sessions.SetActive(userID, full) // Otomatis switch ke akun baru
 
 	profile, profileErr := h.api.GetFullProfile(context.Background(), session)
 	var profileText string
@@ -97,16 +110,21 @@ func (h *Handler) handlePhoneInput(b *gotgbot.Bot, ctx *ext.Context, userID int6
 		profileText = "\n" + telkomsel.FormatProfile(profile)
 	}
 
+	kb := kbProfile(len(h.sessions.List()))
 	_, replyErr := ctx.EffectiveMessage.Reply(b, fmt.Sprintf("✅ Login berhasil!%s\nPilih aksi:", profileText), &gotgbot.SendMessageOpts{
 		ParseMode:   "Markdown",
-		ReplyMarkup: kbProfile(),
+		ReplyMarkup: kb,
 	})
 	return replyErr
 }
 
 func (h *Handler) handleOTPInput(b *gotgbot.Bot, ctx *ext.Context, userID int64, text string) error {
+	h.pendingLoginMu.Lock()
+	full := h.pendingLogin[userID]
+	h.pendingLoginMu.Unlock()
+
 	h.otpChansMu.Lock()
-	otpChan, hasOTP := h.otpChans[userID]
+	otpChan, hasOTP := h.otpChans[full]
 	h.otpChansMu.Unlock()
 
 	if !hasOTP {
@@ -124,5 +142,4 @@ func (h *Handler) handleOTPInput(b *gotgbot.Bot, ctx *ext.Context, userID int64,
 
 func (h *Handler) cbLogin(b *gotgbot.Bot, chatID, msgID, userID int64) {
 	h.editMsg(b, chatID, msgID, "📱 Kirim nomor HP Telkomsel kamu.\n\nContoh: `812xxxxxxxx`", nil)
-	h.sessions.Set(userID, &model.Session{State: model.StateAwaitingPhone})
 }

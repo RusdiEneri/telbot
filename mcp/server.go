@@ -61,7 +61,7 @@ func Run() {
 				return mcp.NewToolResultError(fmt.Sprintf("Invalid phone number: %v", err)), nil
 			}
 
-			session := sessions.Get(mcpUserID)
+			session := sessions.GetActive(mcpUserID)
 			if session == nil {
 				session = &model.Session{}
 			}
@@ -74,7 +74,8 @@ func Run() {
 				return mcp.NewToolResultError(fmt.Sprintf("Login failed: %v", err)), nil
 			}
 
-			sessions.Set(mcpUserID, session)
+			sessions.Set(session.FullPhone, session)
+			sessions.SetActive(mcpUserID, session.FullPhone)
 			return mcp.NewToolResultText(fmt.Sprintf("📲 OTP dikirim ke +%s. Gunakan tool `submit_otp` dengan kode OTP untuk menyelesaikan login.", full)), nil
 		},
 	)
@@ -90,7 +91,7 @@ func Run() {
 				return mcp.NewToolResultError("otp argument is required"), nil
 			}
 
-			session := sessions.Get(mcpUserID)
+			session := sessions.GetActive(mcpUserID)
 			if session == nil || session.State != model.StateAwaitingOTP {
 				return mcp.NewToolResultError("No login in progress or session expired. Call 'login' first."), nil
 			}
@@ -100,7 +101,8 @@ func Run() {
 				return mcp.NewToolResultError(fmt.Sprintf("Submit OTP failed: %v", err)), nil
 			}
 
-			sessions.Set(mcpUserID, session)
+			sessions.Set(session.FullPhone, session)
+			sessions.SetActive(mcpUserID, session.FullPhone)
 			return mcp.NewToolResultText("✅ Login berhasil! Token disimpan dengan aman. Cek profil dengan `get_profile` untuk verifikasi."), nil
 		},
 	)
@@ -117,7 +119,7 @@ func Run() {
 
 			stopAutoBuyMonitor()
 
-			sessions.Delete(mcpUserID)
+			sessions.Delete(session.FullPhone)
 			return mcp.NewToolResultText("✅ Logout berhasil. Session dihapus."), nil
 		},
 	)
@@ -290,7 +292,7 @@ func Run() {
 			session.AutoBuyThreshold = threshold
 			session.AutoBuyPayment = "AIRTIME"
 			session.AutoBuyActive = true
-			sessions.Set(mcpUserID, session)
+			sessions.Set(session.FullPhone, session)
 
 			autoCtx, cancel := context.WithCancel(context.Background())
 			autoCancelMu.Lock()
@@ -321,7 +323,7 @@ func Run() {
 			session := getActiveSession(sessions)
 			if session != nil {
 				session.AutoBuyActive = false
-				sessions.Set(mcpUserID, session)
+				sessions.Set(session.FullPhone, session)
 			}
 
 			return mcp.NewToolResultText("🛑 Auto-buy dihentikan."), nil
@@ -360,7 +362,7 @@ func Run() {
 }
 
 func getActiveSession(manager *model.SessionManager) *model.Session {
-	all := manager.All()
+	all := manager.List()
 	for _, session := range all {
 		if session.IsLoggedIn() {
 			return session

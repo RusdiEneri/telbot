@@ -22,7 +22,7 @@ func (h *Handler) cbShowProfile(b *gotgbot.Bot, chatID, msgID, userID int64) {
 	profile, err := h.api.GetFullProfile(apiCtx, session)
 	if err != nil {
 		if errors.Is(err, telkomsel.ErrUnauthorized) {
-			h.sessions.Delete(userID)
+			h.sessions.Delete(session.FullPhone)
 			h.showExpiredLogin(b, chatID, msgID, "⚠️ Sesi expired!")
 			return
 		}
@@ -32,7 +32,7 @@ func (h *Handler) cbShowProfile(b *gotgbot.Bot, chatID, msgID, userID int64) {
 	}
 
 	text := telkomsel.FormatProfile(profile) + "\nPilih aksi:"
-	kb := kbProfile()
+	kb := kbProfile(len(h.sessions.List()))
 	h.editMsg(b, chatID, msgID, text, &kb)
 }
 
@@ -47,6 +47,11 @@ func (h *Handler) cbShowMenu(b *gotgbot.Bot, chatID, msgID, userID int64) {
 	apiCtx := context.Background()
 	offers, err := h.api.GetRecommendedOffers(apiCtx, session)
 	if err != nil {
+		if errors.Is(err, telkomsel.ErrUnauthorized) {
+			h.sessions.Delete(session.FullPhone)
+			h.showExpiredLogin(b, chatID, msgID, "⚠️ Sesi expired!")
+			return
+		}
 		kb := kbMenu()
 		h.editMsg(b, chatID, msgID, "📦 Pilih paket:", &kb)
 		return
@@ -69,7 +74,7 @@ func (h *Handler) cbCheckQuota(b *gotgbot.Bot, chatID, msgID, userID int64) {
 	quota, err := h.api.CheckQuota(apiCtx, session)
 	if err != nil {
 		if errors.Is(err, telkomsel.ErrUnauthorized) {
-			h.sessions.Delete(userID)
+			h.sessions.Delete(session.FullPhone)
 			h.showExpiredLogin(b, chatID, msgID, "⚠️ Sesi expired!")
 			return
 		}

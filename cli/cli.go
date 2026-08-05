@@ -33,14 +33,16 @@ func Run() {
 	sessions := model.NewSessionManager(config.GetSessionPath())
 
 	var loggedInUser *model.Session
-	var loggedInID int64
-	for id, s := range sessions.All() {
+	var loggedInID int64 = 1
+	for _, s := range sessions.List() {
 		if s.IsLoggedIn() {
 			if loggedInUser == nil || s.LastLoginAt.After(loggedInUser.LastLoginAt) {
 				loggedInUser = s
-				loggedInID = id
 			}
 		}
+	}
+	if loggedInUser != nil {
+		sessions.SetActive(loggedInID, loggedInUser.FullPhone)
 	}
 
 	m := newModel(api, auth, sessions)

@@ -36,7 +36,7 @@ func (h *Handler) cbBuy(b *gotgbot.Bot, chatID, msgID, userID int64, paymentMeth
 	details, err := h.api.GetPackageDetails(apiCtx, session, offerID)
 	if err != nil {
 		if errors.Is(err, telkomsel.ErrUnauthorized) {
-			h.sessions.Delete(userID)
+			h.sessions.Delete(session.FullPhone)
 			h.showExpiredLogin(b, chatID, msgID, "⚠️ Sesi expired!")
 			return
 		}
@@ -47,7 +47,7 @@ func (h *Handler) cbBuy(b *gotgbot.Bot, chatID, msgID, userID int64, paymentMeth
 
 	session.PendingOfferID = offerID
 	session.PendingPayment = paymentMethod
-	h.sessions.Set(userID, session)
+	h.sessions.Set(session.FullPhone, session)
 
 	text := telkomsel.FormatPackageDetails(details) + "\n💳 Bayar: *" + paymentMethod + "*"
 
@@ -87,7 +87,7 @@ func (h *Handler) cbConfirmBuy(b *gotgbot.Bot, chatID, msgID, userID int64) {
 
 	session.PendingOfferID = ""
 	session.PendingPayment = ""
-	h.sessions.Set(userID, session)
+	h.sessions.Set(session.FullPhone, session)
 
 	h.editMsg(b, chatID, msgID, "🛒 Memproses pembelian...", nil)
 
@@ -96,7 +96,7 @@ func (h *Handler) cbConfirmBuy(b *gotgbot.Bot, chatID, msgID, userID int64) {
 	result, err := h.api.BuyIlmupedia(apiCtx, session, offerID, paymentMethod)
 	if err != nil {
 		if errors.Is(err, telkomsel.ErrUnauthorized) {
-			h.sessions.Delete(userID)
+			h.sessions.Delete(session.FullPhone)
 			h.showExpiredLogin(b, chatID, msgID, "⚠️ Sesi expired!")
 			return
 		}
@@ -105,7 +105,7 @@ func (h *Handler) cbConfirmBuy(b *gotgbot.Bot, chatID, msgID, userID int64) {
 		return
 	}
 
-	kb := kbBack("back_profile")
+	kb := kbProfile(len(h.sessions.List()))
 	if result.QRURL != "" {
 		h.editMsg(b, chatID, msgID, fmt.Sprintf("✅ Order dibuat!\n🆔 `%s`\n\n📱 Scan QRIS di bawah...", result.OrderID), nil)
 
@@ -120,14 +120,14 @@ func (h *Handler) cbConfirmBuy(b *gotgbot.Bot, chatID, msgID, userID int64) {
 			h.editMsg(b, chatID, msgID, telkomsel.FormatPurchaseResult(result, paymentMethod), &kb)
 		}
 
-		go h.pollPaymentStatus(b, chatID, userID, result.OrderID)
+		go h.pollPaymentStatus(b, chatID, session.FullPhone, result.OrderID)
 	} else {
 		h.editMsg(b, chatID, msgID, telkomsel.FormatPurchaseResult(result, paymentMethod), &kb)
 	}
 }
 
-func (h *Handler) pollPaymentStatus(b *gotgbot.Bot, chatID, userID int64, orderID string) {
-	session := h.sessions.Get(userID)
+func (h *Handler) pollPaymentStatus(b *gotgbot.Bot, chatID int64, phone string, orderID string) {
+	session := h.sessions.Get(phone)
 	if session == nil {
 		return
 	}
@@ -153,7 +153,7 @@ func (h *Handler) pollPaymentStatus(b *gotgbot.Bot, chatID, userID int64, orderI
 		}
 	}
 
-	kb := kbProfile()
+	kb := kbProfile(len(h.sessions.List()))
 	_, _ = b.SendMessage(chatID, msg, &gotgbot.SendMessageOpts{
 		ParseMode:   "Markdown",
 		ReplyMarkup: kb,

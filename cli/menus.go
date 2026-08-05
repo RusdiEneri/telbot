@@ -74,7 +74,7 @@ func (m tuiModel) selectMenu(selected string) (tea.Model, tea.Cmd) {
 			m.message = "Belum login."
 			return m, nil
 		}
-		m.sessions.Delete(m.loggedInID)
+		m.sessions.Delete(m.loggedInUser.FullPhone)
 		m.loggedInUser = nil
 		m.message = "✓ Sudah logout."
 		m.cursor = 0
@@ -279,7 +279,7 @@ func (m tuiModel) updateScheduleMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case 0:
 				if m.loggedInUser != nil {
 					m.loggedInUser.AutoBuyActive = !m.loggedInUser.AutoBuyActive
-					m.sessions.Set(m.loggedInID, m.loggedInUser)
+					m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
 					if m.loggedInUser.AutoBuyActive {
 						m.message = "✓ Auto-Buy diaktifkan"
 					} else {
@@ -321,7 +321,7 @@ func (m tuiModel) updateScheduleThreshold(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var i int
 				fmt.Sscanf(m.schThreshold, "%d", &i)
 				m.loggedInUser.AutoBuyThreshold = i
-				m.sessions.Set(m.loggedInID, m.loggedInUser)
+				m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
 				m.message = "✓ Threshold diupdate"
 			}
 			m.screen = screenScheduleMenu
@@ -342,7 +342,7 @@ func (m tuiModel) updateScheduleInterval(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var i int
 				fmt.Sscanf(m.schInterval, "%d", &i)
 				m.loggedInUser.AutoBuyInterval = i
-				m.sessions.Set(m.loggedInID, m.loggedInUser)
+				m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
 				m.message = "✓ Interval diupdate"
 			}
 			m.screen = screenScheduleMenu
@@ -361,7 +361,7 @@ func (m tuiModel) updateScheduleOfferID(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.schOfferID = m.input.Value()
 			if m.loggedInUser != nil {
 				m.loggedInUser.AutoBuyPackage = m.schOfferID
-				m.sessions.Set(m.loggedInID, m.loggedInUser)
+				m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
 				m.message = "✓ Offer ID diupdate"
 			}
 			m.screen = screenScheduleMenu
@@ -392,14 +392,14 @@ func (m tuiModel) updateSchedulePayment(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.schPayment = "AIRTIME"
 				if m.loggedInUser != nil {
 					m.loggedInUser.AutoBuyPayment = m.schPayment
-					m.sessions.Set(m.loggedInID, m.loggedInUser)
+					m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
 					m.message = "✓ Payment diupdate"
 				}
 			case 1:
 				m.schPayment = "qris"
 				if m.loggedInUser != nil {
 					m.loggedInUser.AutoBuyPayment = m.schPayment
-					m.sessions.Set(m.loggedInID, m.loggedInUser)
+					m.sessions.Set(m.loggedInUser.FullPhone, m.loggedInUser)
 					m.message = "✓ Payment diupdate"
 				}
 			case 2:

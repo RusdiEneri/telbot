@@ -12,24 +12,16 @@ import (
 type SessionState string
 
 const (
-	StateIdle              SessionState = ""
-	StateAwaitingPhone     SessionState = "awaiting_phone"
-	StateAwaitingOfferID   SessionState = "awaiting_offer_id"
-	StateAwaitingAutoInt       SessionState = "awaiting_auto_interval"
-	StateAwaitingAutoThreshold SessionState = "awaiting_auto_threshold"
-	StateAwaitingAutoOffer     SessionState = "awaiting_auto_offer_id"
-	StateAwaitingOTP           SessionState = "awaiting_otp"
-	StateLoggedIn              SessionState = "logged_in"
+	StateIdle                  SessionState = "idle"
+	StateAwaitingPhone         SessionState = "awaiting_phone"
 	StateLoggingIn             SessionState = "logging_in"
+	StateAwaitingOTP           SessionState = "awaiting_otp"
+	StateAwaitingOfferID       SessionState = "awaiting_offer_id"
+	StateAwaitingAutoInt       SessionState = "awaiting_auto_int"
+	StateAwaitingAutoThreshold SessionState = "awaiting_auto_threshold"
+	StateAwaitingAutoOffer     SessionState = "awaiting_auto_offer"
+	StateLoggedIn              SessionState = "logged_in"
 )
-
-func (s SessionState) IsAwaiting() bool {
-	switch s {
-	case StateAwaitingPhone, StateAwaitingOfferID, StateAwaitingAutoInt, StateAwaitingAutoThreshold, StateAwaitingAutoOffer, StateAwaitingOTP:
-		return true
-	}
-	return false
-}
 
 type Session struct {
 	Phone         string       `json:"phone"`
@@ -42,10 +34,10 @@ type Session struct {
 	State         SessionState `json:"state"`
 	LastLoginAt   time.Time    `json:"last_login_at"`
 
-	PendingAuthId      string `json:"pending_auth_id,omitempty"`
-	PendingAmlbCookie  string `json:"pending_amlbcookie,omitempty"`
-	PendingOfferID     string `json:"pending_offer_id,omitempty"`
-	PendingPayment     string `json:"pending_payment,omitempty"`
+	PendingAuthId     string `json:"pending_auth_id,omitempty"`
+	PendingAmlbCookie string `json:"pending_amlbcookie,omitempty"`
+	PendingOfferID    string `json:"pending_offer_id,omitempty"`
+	PendingPayment    string `json:"pending_payment,omitempty"`
 
 	AutoBuyInterval  int    `json:"auto_buy_interval"`
 	AutoBuyThreshold int    `json:"auto_buy_threshold"`
@@ -56,12 +48,17 @@ type Session struct {
 }
 
 func (s *Session) IsLoggedIn() bool {
-	return s.AccessAuth != "" && s.Authorization != ""
+	return s.State == StateLoggedIn && s.AccessAuth != ""
+}
+
+func (s *Session) IsAwaiting() bool {
+	return s.State == StateAwaitingPhone || s.State == StateAwaitingOTP || s.State == StateLoggingIn
 }
 
 type SessionManager struct {
 	mu       sync.RWMutex
-	sessions map[int64]*Session
+	sessions map[string]*Session // Key adalah FullPhone (contoh: 62812xxx)
+	active   map[int64]string    // Key adalah Telegram UserID, Value adalah FullPhone
 	filename string
 }
 
@@ -72,7 +69,8 @@ func NewSessionManager(filename string) *SessionManager {
 	}
 
 	sm := &SessionManager{
-		sessions: make(map[int64]*Session),
+		sessions: make(map[string]*Session),
+		active:   make(map[int64]string),
 		filename: filename,
 	}
 	if filename != "" {
@@ -81,34 +79,61 @@ func NewSessionManager(filename string) *SessionManager {
 	return sm
 }
 
-func (sm *SessionManager) Get(userID int64) *Session {
+func (sm *SessionManager) Get(phone string) *Session {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	return sm.sessions[userID]
+	return sm.sessions[phone]
 }
 
-func (sm *SessionManager) Set(userID int64, session *Session) {
+func (sm *SessionManager) Set(phone string, session *Session) {
 	sm.mu.Lock()
-	sm.sessions[userID] = session
+	sm.sessions[phone] = session
 	sm.mu.Unlock()
 	sm.SaveToFile()
 }
 
-func (sm *SessionManager) Delete(userID int64) {
+func (sm *SessionManager) Delete(phone string) {
 	sm.mu.Lock()
-	delete(sm.sessions, userID)
+	delete(sm.sessions, phone)
+	for userID, activePhone := range sm.active {
+		if activePhone == phone {
+			delete(sm.active, userID)
+		}
+	}
 	sm.mu.Unlock()
 	sm.SaveToFile()
 }
 
-func (sm *SessionManager) All() map[int64]*Session {
+func (sm *SessionManager) List() []*Session {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	result := make(map[int64]*Session, len(sm.sessions))
-	for k, v := range sm.sessions {
-		result[k] = v
+	result := make([]*Session, 0, len(sm.sessions))
+	for _, v := range sm.sessions {
+		result = append(result, v)
 	}
 	return result
+}
+
+func (sm *SessionManager) SetActive(userID int64, phone string) {
+	sm.mu.Lock()
+	sm.active[userID] = phone
+	sm.mu.Unlock()
+	sm.SaveToFile()
+}
+
+func (sm *SessionManager) GetActive(userID int64) *Session {
+	sm.mu.RLock()
+	phone, ok := sm.active[userID]
+	sm.mu.RUnlock()
+	if !ok || phone == "" {
+		return nil
+	}
+	return sm.Get(phone)
+}
+
+type sessionData struct {
+	Sessions map[string]*Session `json:"sessions"`
+	Active   map[int64]string    `json:"active,omitempty"`
 }
 
 func (sm *SessionManager) SaveToFile() {
@@ -117,7 +142,11 @@ func (sm *SessionManager) SaveToFile() {
 	}
 
 	sm.mu.RLock()
-	data, err := json.MarshalIndent(sm.sessions, "", "  ")
+	data := sessionData{
+		Sessions: sm.sessions,
+		Active:   sm.active,
+	}
+	jsonData, err := json.MarshalIndent(data, "", "  ")
 	sm.mu.RUnlock()
 
 	if err != nil {
@@ -125,7 +154,7 @@ func (sm *SessionManager) SaveToFile() {
 		return
 	}
 
-	if err := os.WriteFile(sm.filename, data, 0600); err != nil {
+	if err := os.WriteFile(sm.filename, jsonData, 0600); err != nil {
 		log.Printf("❌ Failed to save sessions to %s: %v", sm.filename, err)
 	}
 }
@@ -145,9 +174,33 @@ func (sm *SessionManager) LoadFromFile() {
 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	if err := json.Unmarshal(data, &sm.sessions); err != nil {
-		log.Printf("❌ Failed to parse sessions JSON: %v", err)
-	} else {
+	
+	var newData sessionData
+	if err := json.Unmarshal(data, &newData); err == nil && newData.Sessions != nil {
+		sm.sessions = newData.Sessions
+		if newData.Active != nil {
+			sm.active = newData.Active
+		} else {
+			sm.active = make(map[int64]string)
+		}
 		log.Printf("✅ Loaded %d sessions from %s", len(sm.sessions), sm.filename)
+		return
 	}
+
+	// Fallback: Migrasi format lama (jika sessions.json kamu masih pakai UserID sebagai key)
+	var oldSessions map[int64]*Session
+	if err := json.Unmarshal(data, &oldSessions); err != nil {
+		log.Printf("❌ Failed to parse sessions JSON: %v", err)
+		return
+	}
+	
+	for _, s := range oldSessions {
+		if s.FullPhone != "" {
+			sm.sessions[s.FullPhone] = s
+		} else if s.Phone != "" {
+			sm.sessions[s.Phone] = s
+		}
+	}
+	sm.active = make(map[int64]string)
+	log.Printf("✅ Migrated %d sessions from old format", len(sm.sessions))
 }
