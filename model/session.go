@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -111,6 +112,9 @@ func (sm *SessionManager) List() []*Session {
 	for _, v := range sm.sessions {
 		result = append(result, v)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].FullPhone < result[j].FullPhone
+	})
 	return result
 }
 

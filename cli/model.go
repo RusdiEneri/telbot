@@ -15,6 +15,7 @@ type screen int
 
 const (
 	screenMenu screen = iota
+	screenAccountSelect
 	screenLogin
 	screenOTP
 	screenLoading
@@ -84,8 +85,7 @@ type tuiModel struct {
 	sessions    *model.SessionManager
 	otpListener *otp.Listener
 
-	loggedInUser *model.Session
-	loggedInID   int64
+	activeAccount string // FullPhone dari akun yang aktif
 
 	loginPhone string
 	otpChan    chan string
@@ -122,6 +122,13 @@ func newModel(api *telkomsel.Client, auth *telkomsel.Auth, sessions *model.Sessi
 		auth:     auth,
 		sessions: sessions,
 	}
+}
+
+func (m tuiModel) getActiveSession() *model.Session {
+	if m.activeAccount == "" {
+		return nil
+	}
+	return m.sessions.Get(m.activeAccount)
 }
 
 func (m tuiModel) Init() tea.Cmd {
